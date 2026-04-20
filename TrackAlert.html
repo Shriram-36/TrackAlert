@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TaskRing</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#0A0A0F;color:#F0EFF8;font-family:'Plus Jakarta Sans',system-ui,sans-serif;}
+  ::-webkit-scrollbar{width:4px;}
+  ::-webkit-scrollbar-track{background:#13131A;}
+  ::-webkit-scrollbar-thumb{background:#3A3A50;border-radius:4px;}
+  input,select,textarea{background:#13131A;border:1px solid #2A2A3A;color:#F0EFF8;border-radius:10px;padding:10px 14px;font-family:inherit;font-size:14px;outline:none;transition:border-color 0.2s;}
+  input:focus,select:focus,textarea:focus{border-color:#6C63FF;}
+  select option{background:#1C1C26;}
+  @keyframes slideUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes ring{0%,100%{transform:rotate(0)}10%{transform:rotate(-15deg)}20%{transform:rotate(15deg)}30%{transform:rotate(-10deg)}40%{transform:rotate(10deg)}50%{transform:rotate(0)}}
+  @keyframes glow{0%,100%{box-shadow:0 0 12px rgba(108,99,255,0.25)}50%{box-shadow:0 0 28px rgba(108,99,255,0.4)}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes pop{0%{transform:scale(0.88);opacity:0}60%{transform:scale(1.03)}100%{transform:scale(1);opacity:1}}
+  @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const C = {
+  bg:"#0A0A0F", surface:"#13131A", card:"#1C1C26", border:"#2A2A3A",
+  accent:"#6C63FF", accentGlow:"rgba(108,99,255,0.25)", accentSoft:"#8B85FF",
+  green:"#22D3A4", greenSoft:"rgba(34,211,164,0.15)",
+  orange:"#FF8C42", orangeSoft:"rgba(255,140,66,0.15)",
+  red:"#FF4D6D", redSoft:"rgba(255,77,109,0.15)",
+  yellow:"#FFD166", yellowSoft:"rgba(255,209,102,0.15)",
+  text:"#F0EFF8", muted:"#7E7D9A", faint:"#3A3A50",
+};
+
+const SUBJECTS = ["Math","Physics","Chemistry","English","History","Computer Science","Biology","Art","Music","Economics"];
+const PRIORITIES = ["low","medium","high","urgent"];
+const PC = { low:C.green, medium:C.yellow, high:C.orange, urgent:C.red };
+const PB = { low:C.greenSoft, medium:C.yellowSoft, high:C.orangeSoft, urgent:C.redSoft };
+
+function genId() { return Math.random().toString(36).slice(2,9); }
+function daysLeft(due) { return Math.ceil((new Date(due)-new Date())/86400000); }
+function fmtDate(d) { return new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}); }
+
+const DEMO = [
+  { id:"d1", title:"Integration by parts worksheet", subject:"Math", priority:"urgent",
+    dueDate:new Date(Date.now()+86400000).toISOString().slice(0,10), dueTime:"23:59",
+    desc:"Pages 45–52", completed:false, createdAt:new Date().toISOString(), alertTime:Date.now()+3600000 },
+  { id:"d2", title:"Essay: Causes of WW1", subject:"History", priority:"high",
+    dueDate:new Date(Date.now()+3*86400000).toISOString().slice(0,10), dueTime:"23:59",
+    desc:"1500 words, MLA format", completed:false, createdAt:new Date().toISOString(), alertTime:Date.now()+7200000 },
+  { id:"d3", title:"Lab report — titration", subject:"Chemistry", priority:"medium",
+    dueDate:new Date(Date.now()+7*86400000).toISOString().slice(0,10), dueTime:"23:59",
+    desc:"", completed:false, createdAt:new Date().toISOString(), alertTime:Date.now()+10*3600000 },
+  { id:"d4", title:"Python sorting algorithms", subject:"Computer Science", priority:"low",
+    dueDate:new Date(Date.now()-86400000).toISOString().slice(0,10), dueTime:"23:59",
+    desc:"Bubble, merge, quicksort", completed:false, createdAt:new Date().toISOString(), alertTime:Date.now()-3600000 },
+  { id:"d5", title:"Vocab quiz prep", subject:"English", priority:"medium",
+    dueDate:new Date(Date.now()-2*86400000).toISOString().slice(0,10), dueTime:"23:59",
+    desc:"", completed:true, createdAt:new Date().toISOString(), alertTime:Date.now()-5*3600000 },
+];
+
+// ── Assignment detail modal ───────────────────────────────────────────────────
+function AssignModal({ a, onClose, onComplete, onDelete }) {
+  const dl = daysLeft(a.dueDate);
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:16,animation:"fadeIn 0.15s ease"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:20,padding:24,maxWidth:460,width:"100%",maxHeight:"90vh",overflowY:"auto",animation:"pop 0.2s ease"}}>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div style={{flex:1,paddingRight:10}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+              <span style={{background:C.accentGlow,color:C.accentSoft,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,textTransform:"uppercase"}}>{a.subject}</span>
+              <span style={{background:PB[a.priority],color:PC[a.priority],fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,textTransform:"uppercase"}}>{a.priority}</span>
+              {a.completed&&<span style={{background:C.greenSoft,color:C.green,fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,textTransform:"uppercase"}}>Done</span>}
+            </div>
+            <div style={{fontSize:18,fontWeight:800,lineHeight:1.3}}>{a.title}</div>
+            {a.desc&&<div style={{fontSize:13,color:C.muted,marginTop:6,lineHeight:1.6}}>{a.desc}</div>}
+          </div>
+          <button onClick={onClose} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:8,width:30,height:30,cursor:"pointer",fontSize:15,flexShrink:0}}>✕</button>
+        </div>
+
+        <div style={{background:C.card,border:`1px solid ${dl<0?C.red:dl===0?C.orange:C.border}`,borderRadius:12,padding:"12px 16px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>Due</div>
+            <div style={{fontSize:14,fontWeight:700}}>{fmtDate(a.dueDate)} · {a.dueTime}</div>
+          </div>
+          <div style={{fontSize:14,fontWeight:800,fontFamily:"'Space Mono',monospace",color:dl<0?C.red:dl===0?C.orange:dl<=3?C.yellow:C.green}}>
+            {dl<0?`${Math.abs(dl)}d overdue`:dl===0?"TODAY":`${dl}d left`}
+          </div>
+        </div>
+
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 16px",marginBottom:20}}>
+          <div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Details</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:C.muted}}>Subject</span>
+              <span style={{fontWeight:600}}>{a.subject}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:C.muted}}>Priority</span>
+              <span style={{fontWeight:600,color:PC[a.priority]}}>{a.priority}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:C.muted}}>Added</span>
+              <span style={{fontWeight:600}}>{fmtDate(a.createdAt)}</span>
+            </div>
+            {a.desc&&(
+              <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8,marginTop:2}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Notes</div>
+                <div style={{fontSize:13,color:C.text,lineHeight:1.6}}>{a.desc}</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!a.completed&&(
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{onComplete(a.id);onClose();}} style={{flex:1,background:C.greenSoft,border:`1px solid ${C.green}`,color:C.green,borderRadius:10,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Mark complete</button>
+            <button onClick={()=>{onDelete(a.id);onClose();}} style={{background:C.redSoft,border:`1px solid ${C.red}`,color:C.red,borderRadius:10,padding:"11px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ Delete</button>
+          </div>
+        )}
+        {a.completed&&(
+          <button onClick={()=>{onDelete(a.id);onClose();}} style={{width:"100%",background:C.redSoft,border:`1px solid ${C.red}`,color:C.red,borderRadius:10,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ Delete</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Assignment card ───────────────────────────────────────────────────────────
+function AssignCard({ a, onOpen, onComplete, onDelete }) {
+  const dl = daysLeft(a.dueDate);
+  const overdue = dl < 0, urge = dl <= 1 && !overdue;
+  return (
+    <div onClick={()=>onOpen&&onOpen(a)}
+      style={{background:C.card,border:`1px solid ${overdue?C.red:urge?C.orange:C.border}`,borderRadius:14,padding:"12px 14px",animation:"slideUp 0.3s ease",cursor:onOpen?"pointer":"default",transition:"transform 0.1s",position:"relative",overflow:"hidden"}}
+      onMouseEnter={e=>{if(onOpen)e.currentTarget.style.transform="translateY(-2px)";}}
+      onMouseLeave={e=>{e.currentTarget.style.transform="none";}}
+    >
+      {(overdue||urge)&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,${overdue?C.red:C.orange},transparent)`}}/>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+            <span style={{background:C.accentGlow,color:C.accentSoft,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99,textTransform:"uppercase"}}>{a.subject}</span>
+            <span style={{background:PB[a.priority],color:PC[a.priority],fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99,textTransform:"uppercase"}}>{a.priority}</span>
+            {a.completed&&<span style={{background:C.greenSoft,color:C.green,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:99,textTransform:"uppercase"}}>Done</span>}
+          </div>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:5,lineHeight:1.3}}>{a.title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:overdue?C.red:urge?C.orange:C.muted,fontWeight:600}}>
+              {overdue?`${Math.abs(dl)}d overdue`:dl===0?"TODAY":`${dl}d left`} · {fmtDate(a.dueDate)}
+            </span>
+          </div>
+          {a.desc&&<div style={{fontSize:11,color:C.muted,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:220}}>{a.desc}</div>}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+          {!a.completed&&onComplete&&(
+            <button onClick={e=>{e.stopPropagation();onComplete(a.id);}} style={{background:C.greenSoft,border:`1px solid ${C.green}`,color:C.green,borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓</button>
+          )}
+          {onDelete&&(
+            <button onClick={e=>{e.stopPropagation();onDelete(a.id);}} style={{background:C.redSoft,border:`1px solid ${C.red}`,color:C.red,borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+function Nav({ page, setPage, notifCount }) {
+  const tabs = [
+    {id:"dashboard", icon:"⊞", label:"Home"},
+    {id:"add",       icon:"+",  label:"Add"},
+    {id:"complete",  icon:"✓",  label:"Done"},
+    {id:"alerts",    icon:"🔔", label:"Alerts"},
+  ];
+  return (
+    <nav style={{display:"flex",alignItems:"center",gap:4,background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"0 14px",height:54,position:"sticky",top:0,zIndex:100}}>
+      <div style={{display:"flex",alignItems:"center",gap:7,marginRight:"auto"}}>
+        <span style={{fontSize:18}}>📚</span>
+        <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,fontSize:14,color:C.accentSoft}}>TASKRING</span>
+      </div>
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>setPage(t.id)} style={{background:page===t.id?C.card:"transparent",border:page===t.id?`1px solid ${C.border}`:"1px solid transparent",color:page===t.id?C.accentSoft:C.muted,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:14,fontFamily:"inherit",position:"relative",transition:"all 0.14s"}}>
+          {t.icon}
+          {t.id==="alerts"&&notifCount>0&&(
+            <span style={{position:"absolute",top:2,right:2,background:C.red,color:"#fff",fontSize:9,fontWeight:800,borderRadius:99,width:13,height:13,display:"flex",alignItems:"center",justifyContent:"center"}}>{notifCount}</span>
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ assignments, onComplete, onDelete, onOpen, setPage }) {
+  const pending = assignments.filter(a=>!a.completed);
+  const done    = assignments.filter(a=>a.completed);
+  const overdue = pending.filter(a=>daysLeft(a.dueDate)<0);
+  const today   = pending.filter(a=>daysLeft(a.dueDate)===0);
+  const pct     = assignments.length ? Math.round(done.length/assignments.length*100) : 0;
+
+  const stats = [
+    {label:"Total",   val:assignments.length, col:C.accentSoft},
+    {label:"Pending", val:pending.length,     col:C.orange},
+    {label:"Done",    val:done.length,         col:C.green},
+    {label:"Overdue", val:overdue.length,      col:C.red},
+  ];
+
+  return (
+    <div style={{padding:"18px 14px",maxWidth:740,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <h1 style={{fontSize:22,fontWeight:800,marginBottom:2}}>Dashboard 📊</h1>
+        <p style={{color:C.muted,fontSize:12}}>Tap any card to view details</p>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {stats.map((s,i)=>(
+          <div key={i} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:13,padding:"13px 10px",textAlign:"center",animation:`slideUp ${0.2+i*0.05}s ease`}}>
+            <div style={{fontSize:22,fontWeight:800,fontFamily:"'Space Mono',monospace",color:s.col}}>{s.val}</div>
+            <div style={{fontSize:10,color:C.muted,marginTop:2,fontWeight:600}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:13,padding:"14px 18px",marginBottom:14,display:"flex",alignItems:"center",gap:16}}>
+        <svg width={56} height={56} viewBox="0 0 60 60">
+          <circle cx={30} cy={30} r={24} fill="none" stroke={C.faint} strokeWidth={5}/>
+          <circle cx={30} cy={30} r={24} fill="none" stroke={C.accent} strokeWidth={5}
+            strokeDasharray={`${2*Math.PI*24}`}
+            strokeDashoffset={`${2*Math.PI*24*(1-pct/100)}`}
+            strokeLinecap="round" transform="rotate(-90 30 30)"
+            style={{transition:"stroke-dashoffset 0.8s ease"}}/>
+          <text x={30} y={35} textAnchor="middle" fill={C.text} fontSize={11} fontWeight={800} fontFamily="'Space Mono',monospace">{pct}%</text>
+        </svg>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:700}}>Overall progress</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:2}}>{done.length} of {assignments.length} completed</div>
+          <div style={{marginTop:8,height:5,background:C.faint,borderRadius:99}}>
+            <div style={{height:5,background:"linear-gradient(90deg,#6C63FF,#8B85FF)",borderRadius:99,width:`${pct}%`,transition:"width 0.8s ease"}}/>
+          </div>
+        </div>
+      </div>
+
+      {overdue.length>0&&(
+        <div style={{background:C.redSoft,border:`1px solid ${C.red}`,borderRadius:11,padding:"10px 14px",marginBottom:8,fontSize:13,display:"flex",alignItems:"center",gap:9,animation:"glow 2s infinite"}}>
+          <span style={{animation:"ring 2s infinite",display:"inline-block"}}>🔔</span>
+          <span><strong style={{color:C.red}}>{overdue.length} overdue!</strong><span style={{color:C.muted,marginLeft:6}}>Needs attention</span></span>
+        </div>
+      )}
+      {today.length>0&&(
+        <div style={{background:C.orangeSoft,border:`1px solid ${C.orange}`,borderRadius:11,padding:"10px 14px",marginBottom:10,fontSize:13,display:"flex",alignItems:"center",gap:9}}>
+          <span>⚡</span>
+          <span><strong style={{color:C.orange}}>{today.length} due today!</strong></span>
+        </div>
+      )}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,marginTop:16}}>
+        <h2 style={{fontSize:14,fontWeight:700}}>Pending ({pending.length})</h2>
+        <button onClick={()=>setPage("add")} style={{background:C.accent,border:"none",color:"#fff",borderRadius:9,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>
+      </div>
+
+      {pending.length===0 ? (
+        <div style={{textAlign:"center",padding:"40px",color:C.muted,background:C.card,borderRadius:13,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:32,marginBottom:8}}>🎉</div>
+          <div style={{fontWeight:700,fontSize:15}}>All caught up!</div>
+          <div style={{fontSize:12,marginTop:4}}>No pending assignments</div>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {pending.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).map(a=>(
+            <AssignCard key={a.id} a={a} onOpen={onOpen} onComplete={onComplete} onDelete={onDelete}/>
+          ))}
+        </div>
+      )}
+
+      {done.length>0&&(
+        <div style={{marginTop:24}}>
+          <h2 style={{fontSize:13,fontWeight:700,marginBottom:9,opacity:0.7}}>Completed ({done.length})</h2>
+          <div style={{display:"flex",flexDirection:"column",gap:7,opacity:0.55}}>
+            {done.slice(0,3).map(a=><AssignCard key={a.id} a={a} onOpen={onOpen} onDelete={onDelete}/>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Add Assignment ────────────────────────────────────────────────────────────
+function AddAssignment({ onAdd }) {
+  const [form, setForm] = useState({title:"",subject:"Math",priority:"medium",dueDate:"",dueTime:"23:59",desc:"",alertBefore:60});
+  const [ok, setOk] = useState(false);
+  const upd = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = () => {
+    if(!form.title||!form.dueDate) return;
+    onAdd({
+      id:genId(), ...form, completed:false,
+      createdAt:new Date().toISOString(),
+      alertTime:new Date(`${form.dueDate}T${form.dueTime}`).getTime()-form.alertBefore*60000,
+    });
+    setOk(true);
+    setForm({title:"",subject:"Math",priority:"medium",dueDate:"",dueTime:"23:59",desc:"",alertBefore:60});
+    setTimeout(()=>setOk(false), 3000);
+  };
+
+  const valid = form.title && form.dueDate;
+
+  return (
+    <div style={{padding:"18px 14px",maxWidth:560,margin:"0 auto"}}>
+      <h1 style={{fontSize:22,fontWeight:800,marginBottom:3}}>Add Assignment ✏️</h1>
+      <p style={{color:C.muted,fontSize:12,marginBottom:18}}>Fill in the details and set a reminder</p>
+
+      {ok&&(
+        <div style={{background:C.greenSoft,border:`1px solid ${C.green}`,borderRadius:11,padding:"11px 14px",marginBottom:14,fontSize:13,color:C.green,fontWeight:600,animation:"slideUp 0.3s ease",display:"flex",alignItems:"center",gap:7}}>
+          <span style={{animation:"bounce 0.5s ease",display:"inline-block"}}>✅</span> Assignment added successfully!
+        </div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div>
+          <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Title *</label>
+          <input value={form.title} onChange={e=>upd("title",e.target.value)} placeholder="e.g. Chapter 5 homework" style={{width:"100%"}}/>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div>
+            <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Subject</label>
+            <select value={form.subject} onChange={e=>upd("subject",e.target.value)} style={{width:"100%"}}>
+              {SUBJECTS.map(s=><option key={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Priority</label>
+            <select value={form.priority} onChange={e=>upd("priority",e.target.value)} style={{width:"100%"}}>
+              {PRIORITIES.map(p=><option key={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div>
+            <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Due Date *</label>
+            <input type="date" value={form.dueDate} onChange={e=>upd("dueDate",e.target.value)} style={{width:"100%"}}/>
+          </div>
+          <div>
+            <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Due Time</label>
+            <input type="time" value={form.dueTime} onChange={e=>upd("dueTime",e.target.value)} style={{width:"100%"}}/>
+          </div>
+        </div>
+
+        <div>
+          <label style={{fontSize:10,fontWeight:700,color:C.muted,display:"block",marginBottom:5,letterSpacing:"0.07em",textTransform:"uppercase"}}>Notes</label>
+          <textarea value={form.desc} onChange={e=>upd("desc",e.target.value)} placeholder="Page numbers, requirements, links..." rows={2} style={{width:"100%",resize:"vertical"}}/>
+        </div>
+
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:13,padding:"13px 15px"}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:9,display:"flex",alignItems:"center",gap:7}}>
+            <span style={{animation:"ring 3s infinite",display:"inline-block"}}>🔔</span>
+            Reminder
+            <span style={{fontSize:12,color:C.accentSoft,fontWeight:600}}>
+              {form.alertBefore>=60 ? `${form.alertBefore/60}h` : `${form.alertBefore}m`} before due
+            </span>
+          </div>
+          <input type="range" min={15} max={1440} step={15} value={form.alertBefore}
+            onChange={e=>upd("alertBefore",+e.target.value)}
+            style={{width:"100%",border:"none",padding:0,background:"transparent"}}/>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.muted,marginTop:4}}>
+            <span>15 min</span><span>6 hrs</span><span>24 hrs</span>
+          </div>
+        </div>
+
+        <button onClick={submit} style={{
+          background:valid?"linear-gradient(135deg,#6C63FF,#8B85FF)":C.faint,
+          border:"none",color:"#fff",borderRadius:11,padding:"13px",
+          fontSize:14,fontWeight:800,cursor:valid?"pointer":"not-allowed",
+          fontFamily:"inherit",opacity:valid?1:0.5,transition:"all 0.2s"
+        }}>
+          + Add Assignment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Mark Complete ─────────────────────────────────────────────────────────────
+function MarkComplete({ assignments, onComplete, onDelete, onOpen }) {
+  const pending = assignments.filter(a=>!a.completed).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const done    = assignments.filter(a=>a.completed);
+
+  return (
+    <div style={{padding:"18px 14px",maxWidth:680,margin:"0 auto"}}>
+      <h1 style={{fontSize:22,fontWeight:800,marginBottom:3}}>Mark Complete ✅</h1>
+      <p style={{color:C.muted,fontSize:12,marginBottom:18}}>Tick off finished work</p>
+
+      {pending.length===0 ? (
+        <div style={{textAlign:"center",padding:"56px",color:C.muted,background:C.card,borderRadius:15,border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:36,marginBottom:10}}>🏆</div>
+          <div style={{fontSize:16,fontWeight:800,color:C.green}}>All done!</div>
+          <div style={{fontSize:12,marginTop:4}}>Nothing pending</div>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {pending.map(a=>{
+            const dl = daysLeft(a.dueDate);
+            return (
+              <div key={a.id} onClick={()=>onOpen&&onOpen(a)}
+                style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:13,padding:"11px 13px",display:"flex",alignItems:"center",gap:11,animation:"slideUp 0.3s ease",cursor:"pointer",transition:"transform 0.1s"}}
+                onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"}
+                onMouseLeave={e=>e.currentTarget.style.transform="none"}
+              >
+                <button onClick={e=>{e.stopPropagation();onComplete(a.id);}}
+                  style={{width:27,height:27,borderRadius:"50%",border:`2px solid ${C.accent}`,background:"transparent",cursor:"pointer",flexShrink:0,fontSize:13,transition:"all 0.14s",color:"transparent",fontFamily:"inherit"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.accent;e.currentTarget.style.color="#fff";e.currentTarget.textContent="✓";}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="transparent";e.currentTarget.textContent="";}}
+                />
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:13}}>{a.title}</div>
+                  <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                    <span style={{background:C.accentGlow,color:C.accentSoft,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:99,textTransform:"uppercase"}}>{a.subject}</span>
+                    <span style={{fontSize:11,color:dl<0?C.red:dl===0?C.orange:C.muted,fontWeight:600}}>
+                      {dl<0?`${Math.abs(dl)}d overdue`:dl===0?"Due today":`${dl}d left`}
+                    </span>
+                  </div>
+                </div>
+                <button onClick={e=>{e.stopPropagation();onDelete(a.id);}} style={{background:C.redSoft,border:`1px solid ${C.red}`,color:C.red,borderRadius:8,padding:"5px 8px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {done.length>0&&(
+        <div style={{marginTop:22}}>
+          <h2 style={{fontSize:13,fontWeight:700,color:C.green,marginBottom:9}}>✓ Completed ({done.length})</h2>
+          <div style={{display:"flex",flexDirection:"column",gap:6,opacity:0.6}}>
+            {done.map(a=>(
+              <div key={a.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 12px",display:"flex",alignItems:"center",gap:9}}>
+                <span style={{width:22,height:22,borderRadius:"50%",background:C.greenSoft,border:`1px solid ${C.green}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.green,flexShrink:0}}>✓</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:600,textDecoration:"line-through",opacity:0.7}}>{a.title}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:1}}>{a.subject} · {fmtDate(a.dueDate)}</div>
+                </div>
+                <button onClick={()=>onDelete(a.id)} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+function AlertsPage({ assignments, notifications, clearNotifs }) {
+  const [ringing, setRinging] = useState(false);
+  const upcoming = assignments.filter(a=>!a.completed).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,8);
+
+  return (
+    <div style={{padding:"18px 14px",maxWidth:680,margin:"0 auto"}}>
+      <h1 style={{fontSize:22,fontWeight:800,marginBottom:3}}>Alerts 🔔</h1>
+      <p style={{color:C.muted,fontSize:12,marginBottom:18}}>Your reminders and upcoming deadlines</p>
+
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:13,padding:"13px 15px",marginBottom:16,display:"flex",alignItems:"center",gap:13,flexWrap:"wrap"}}>
+        <div style={{fontSize:28,animation:ringing?"ring 0.4s infinite":"none",display:"inline-block"}}>🔔</div>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:13}}>Test reminder</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:1}}>Simulate what an alert feels like</div>
+        </div>
+        <button onClick={()=>{setRinging(true);setTimeout(()=>setRinging(false),2500);}}
+          style={{background:ringing?"linear-gradient(135deg,#FF4D6D,#FF8C42)":"linear-gradient(135deg,#6C63FF,#8B85FF)",border:"none",color:"#fff",borderRadius:10,padding:"8px 15px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",animation:ringing?"glow 0.5s infinite":"none"}}>
+          {ringing?"🔊 RINGING...":"Test Alert"}
+        </button>
+      </div>
+
+      <div style={{marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+          <h2 style={{fontSize:14,fontWeight:700}}>Notifications ({notifications.length})</h2>
+          {notifications.length>0&&(
+            <button onClick={clearNotifs} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:8,padding:"4px 11px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Clear all</button>
+          )}
+        </div>
+        {notifications.length===0 ? (
+          <div style={{textAlign:"center",padding:"26px",color:C.muted,background:C.card,borderRadius:11,border:`1px solid ${C.border}`,fontSize:12}}>No notifications yet</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {notifications.map((n,i)=>(
+              <div key={i} style={{background:C.card,border:`1px solid ${n.type==="urgent"?C.red:n.type==="warning"?C.orange:C.border}`,borderRadius:11,padding:"9px 12px",display:"flex",alignItems:"center",gap:9,animation:"slideUp 0.2s ease"}}>
+                <span style={{fontSize:15}}>{n.type==="urgent"?"🚨":n.type==="warning"?"⚠️":"📢"}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:700}}>{n.message}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:1}}>{n.time}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <h2 style={{fontSize:14,fontWeight:700,marginBottom:9}}>Upcoming deadlines</h2>
+      {upcoming.length===0 ? (
+        <div style={{textAlign:"center",padding:"26px",color:C.muted,background:C.card,borderRadius:11,border:`1px solid ${C.border}`,fontSize:12}}>No upcoming assignments</div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {upcoming.map(a=>{
+            const dl = daysLeft(a.dueDate);
+            return (
+              <div key={a.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:11,padding:"10px 13px",display:"flex",alignItems:"center",gap:11}}>
+                <div style={{width:36,height:36,borderRadius:9,background:dl<0?C.redSoft:dl===0?C.orangeSoft:C.accentGlow,border:`1px solid ${dl<0?C.red:dl===0?C.orange:C.accent}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:dl<0?C.red:dl===0?C.orange:C.accentSoft,fontFamily:"'Space Mono',monospace",flexShrink:0,textAlign:"center",lineHeight:1.2}}>
+                  {dl<0?"OD":dl===0?"TD":`${dl}d`}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:700}}>{a.title}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{a.subject} · {fmtDate(a.dueDate)}</div>
+                </div>
+                <span style={{background:PB[a.priority],color:PC[a.priority],fontSize:9,fontWeight:700,padding:"3px 7px",borderRadius:99,textTransform:"uppercase"}}>{a.priority}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [page, setPage]         = useState("dashboard");
+  const [assignments, setAssigns] = useState(DEMO);
+  const [notifs, setNotifs]     = useState([
+    {type:"urgent",  message:'🔴 "Integration by parts" due tomorrow!', time:"2 mins ago"},
+    {type:"warning", message:'⚠️ "Lab report" due in 7 days', time:"1 hour ago"},
+    {type:"info",    message:'📢 "Python sorting" is overdue', time:"2 hours ago"},
+  ]);
+  const [modal, setModal] = useState(null);
+  const alertRef = useRef(null);
+
+  const pushNotif = useCallback((msg, type="info") => {
+    setNotifs(n => [{type, message:msg, time:"Just now"}, ...n].slice(0,25));
+  }, []);
+
+  useEffect(()=>{
+    alertRef.current = setInterval(()=>{
+      const now = Date.now();
+      setAssigns(prev=>{
+        prev.forEach(a=>{
+          if(!a.completed && a.alertTime && Math.abs(a.alertTime-now)<30000)
+            pushNotif(`⏰ "${a.title}" reminder!`, "warning");
+        });
+        return prev;
+      });
+    }, 30000);
+    return () => clearInterval(alertRef.current);
+  }, [pushNotif]);
+
+  const addAssignment = a => {
+    setAssigns(p=>[a,...p]);
+    pushNotif(`📚 Added: "${a.title}"`, "info");
+  };
+
+  const markComplete = id => {
+    const a = assignments.find(x=>x.id===id);
+    setAssigns(p=>p.map(x=>x.id===id ? {...x, completed:true} : x));
+    if(a) pushNotif(`✅ Completed: "${a.title}"`, "info");
+  };
+
+  const deleteAssignment = id => setAssigns(p=>p.filter(x=>x.id!==id));
+
+  const openModal = a => {
+    const latest = assignments.find(x=>x.id===a.id) || a;
+    setModal(latest);
+  };
+
+  useEffect(()=>{
+    if(modal){
+      const latest = assignments.find(x=>x.id===modal.id);
+      if(latest) setModal(latest);
+    }
+  }, [assignments]);
+
+  return (
+    <>
+      <div style={{minHeight:"100vh",background:C.bg}}>
+        <Nav page={page} setPage={setPage} notifCount={notifs.length}/>
+        <div style={{paddingBottom:40}}>
+          {page==="dashboard"&&<Dashboard assignments={assignments} onComplete={markComplete} onDelete={deleteAssignment} onOpen={openModal} setPage={setPage}/>}
+          {page==="add"      &&<AddAssignment onAdd={addAssignment}/>}
+          {page==="complete" &&<MarkComplete assignments={assignments} onComplete={markComplete} onDelete={deleteAssignment} onOpen={openModal}/>}
+          {page==="alerts"   &&<AlertsPage assignments={assignments} notifications={notifs} clearNotifs={()=>setNotifs([])}/>}
+        </div>
+        {modal&&<AssignModal a={modal} onClose={()=>setModal(null)} onComplete={markComplete} onDelete={deleteAssignment}/>}
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
